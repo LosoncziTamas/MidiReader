@@ -32,7 +32,7 @@ union Int16
 	unsigned short integer;
 };
 
-struct __attribute__((packed)) Midi
+struct __attribute__((packed)) MidiHeaderChunk
 {
 	char headerType[4];
 	Int32 length;
@@ -41,14 +41,25 @@ struct __attribute__((packed)) Midi
 	Int16 division;
 };
 
+struct __attribute__((packed)) MidiTrackChunk
+{
+	char headerType[4];
+	Int32 length;
+	unsigned char delta;
+};
+
 Int32 ReverseByteOrderInt32(Int32 data)
 {
 	Int32 result = {0};
 
+#if __has_builtin(__builtin_bswap32)
+	result.integer = __builtin_bswap32(data.integer);
+#else
 	result.bytes[0] = data.bytes[3];
 	result.bytes[1] = data.bytes[2];
 	result.bytes[2] = data.bytes[1];
 	result.bytes[3] = data.bytes[0];
+#endif
 
 	return result;
 }
@@ -57,8 +68,12 @@ Int16 ReverseByteOrderInt16(Int16 data)
 {
 	Int16 result = {0};
 
+#if __has_builtin(__builtin_bswap32)
+	result.integer = __builtin_bswap16(data.integer);
+#else
 	result.bytes[0] = data.bytes[1];
 	result.bytes[1] = data.bytes[0];
+#endif
 
 	return result;
 }
@@ -86,12 +101,17 @@ int main(int argc, char** argv)
 	auto readByteCount = fread(fileBuffer, sizeof(char), byteCount, file);
 
 	assert(readByteCount == byteCount);
-	Midi *midi = reinterpret_cast<Midi*>(fileBuffer);
+	MidiHeaderChunk *header = reinterpret_cast<MidiHeaderChunk*>(fileBuffer);
+	MidiTrackChunk *track = reinterpret_cast<MidiTrackChunk*>(fileBuffer + sizeof(MidiHeaderChunk));
 
-	auto reversedLen = ReverseByteOrderInt32(midi->length);
-	auto format = static_cast<Format>(ReverseByteOrderInt16(midi->format).integer);
-	auto trackChunkCount = ReverseByteOrderInt16(midi->trackChunkCount);
-	auto division = midi->division;
+	auto reversedLen = ReverseByteOrderInt32(header->length);
+	auto format = static_cast<Format>(ReverseByteOrderInt16(header->format).integer);
+	auto trackChunkCount = ReverseByteOrderInt16(header->trackChunkCount);
+	auto division = header->division;
+
+	printf("length %d \n", reversedLen.integer);
+	printf("format %d \n", format);
+	printf("trackChunkCount %d \n", trackChunkCount.integer);
 
 	if (IsSet(division, SecondSubdivision))
 	{
@@ -103,11 +123,13 @@ int main(int argc, char** argv)
 		auto ticksPerNote = GetMaskValue(division, TicksPerQuarterNote);
 	}
 
-	printf("%s \n", midi->headerType);
-	printf("%u \n", midi->length.bytes[0]);
-	printf("%u \n", midi->length.bytes[1]);
-	printf("%u \n", midi->length.bytes[2]);
-	printf("%u \n", midi->length.bytes[3]);
+	if (format == SimultaneousTracks)
+	{
+		// a header chunk followed by one or more track chunks
+		// the tempo map must be stored as the first track
+		// All MIDI Files should specify tempo and time signature
+		// In format 1, these meta-events should be contained in the first track.
+	}
 
 	for (auto i = 0; i < readByteCount; ++i)
 	{
